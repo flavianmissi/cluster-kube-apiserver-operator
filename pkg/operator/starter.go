@@ -349,6 +349,33 @@ func RunOperator(ctx context.Context, controllerContext *controllercmd.Controlle
 		return err
 	}
 
+	kmsPluginStaticPodControllers, err := staticpod.NewBuilder(operatorClient, kubeClient, kubeInformersForNamespaces, clusterInformers.InformersFor(""), configInformers, controllerContext.Clock).
+		WithEvents(controllerContext.EventRecorder).
+		WithInstaller([]string{"kms-plugin", "installer"}).
+		WithPruning([]string{"kms-plugin", "prune"}, "kms-plugin-pod").
+		WithRevisionedResources(operatorclient.TargetNamespace, "kms-plugin-pod", []revision.RevisionResource{{Name: "kms-plugin-pod"}}, []revision.RevisionResource{}).
+		// WithUnrevisionedCerts("kube-apiserver-certs", CertConfigMaps, CertSecrets).
+		WithVersioning("kms-plugin", versionRecorder). // TODO: do we need a kms specific version recorder?
+		WithMinReadyDuration(30 * time.Second).
+		WithStartupMonitor(startupmonitorreadiness.IsStartupMonitorEnabledFunction(configInformers.Config().V1().Infrastructures().Lister(), operatorClient)).
+		// WithPodDisruptionBudgetGuard(
+		// 	"openshift-kube-apiserver-operator",
+		// 	"cluster-kube-apiserver-operator",
+		// 	"6443",
+		// 	"readyz",
+		// 	ptr.To(v1.AlwaysAllow),
+		// 	func() (bool, bool, error) {
+		// 		isSNO, precheckSucceeded, err := common.NewIsSingleNodePlatformFn(configInformers.Config().V1().Infrastructures())()
+		// 		// create only when not a single node topology
+		// 		return !isSNO, precheckSucceeded, err
+		// 	},
+		// ).
+		WithOperandPodLabelSelector(labels.Set{"kms-plugin": "true"}.AsSelector()).
+		ToControllers()
+	if err != nil {
+		return err
+	}
+
 	clusterOperatorStatus := status.NewClusterOperatorStatusController(
 		"kube-apiserver",
 		[]configv1.ObjectReference{
@@ -523,6 +550,7 @@ func RunOperator(ctx context.Context, controllerContext *controllercmd.Controlle
 	operatorInformers.Start(ctx.Done())
 	securityInformers.Start(ctx.Done())
 
+	go kmsPluginStaticPodControllers.Start(ctx)
 	go staticPodControllers.Start(ctx)
 	go resourceSyncController.Run(ctx, 1)
 	go staticResourceController.Run(ctx, 1)
