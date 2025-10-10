@@ -1,0 +1,49 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kms-plugin-pod
+  namespace: {{.TargetNamespace}}
+  labels:
+    app: kms-plugin
+    kms-plugin: true
+spec:
+  containers:
+  - image: {{.ProviderImage}}
+    name: kms-plugin
+    command:
+    - /aws-kms-plugin
+    - --key={{.KeyARN}}
+    - --region={{.Region}}
+    - --listen={{.Listen}}
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - ALL
+        readOnlyRootFilesystem: true
+        runAsUser: 0
+    ports:
+    - containerPort: 8080
+      protocol: TCP
+    livenessProbe:
+      httpGet:
+        path: /healthz
+        port: 8080
+        initialDelaySeconds: 0
+        periodSeconds: 10
+        timeoutSeconds: 10
+        successThreshold: 1
+        failureThreshold: 3
+    volumeMounts:
+    - mountPath: /var/run/kmsplugin
+      name: var-run-kmsplugin
+  volumes:
+  - name: var-run-kmsplugin
+    hostPath:
+      path: /var/run/kmsplugin
+      type: DirectoryOrCreate
+  terminationGracePeriodSeconds: 5
+  hostNetwork: true
+  priorityClassName: system-node-critical
+  tolerations:
+  - operator: "Exists"
